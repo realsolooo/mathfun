@@ -247,6 +247,11 @@ io.on("connection", (socket) => {
   }
 });
 
+app.get("/test", (req, res) => {
+  res.send("Running SoloOS | Version 9.3.2");
+});
+
+
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
