@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>romans stupid games</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    background: #121212;
+    color: white;
+    margin: 0; padding: 0;
+    display: flex; justify-content: center; align-items: center;
+    height: 100vh;
+  }
+  #login, #lobby, #game, #endgame {
+    display: none;
+    width: 90vw;
+    max-width: 600px;
+    background: #222;
+    border-radius: 8px;
+    padding: 20px;
+    box-sizing: border-box;
+  }
+  button {
+    background: #6200ee;
+    border: none;
+    color: white;
+    padding: 10px 15px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  button:disabled {
+    background: #444;
+    cursor: not-allowed;
+  }
+  ul { padding-left: 20px; }
+  .player-list li {
+    margin: 5px 0;
+  }
+  .choice-btn {
+    display: block;
+    margin: 8px 0;
+    padding: 10px;
+    background: #3700b3;
+    border-radius: 6px;
+    cursor: pointer;
+    border: none;
+    width: 100%;
+    font-size: 1rem;
+  }
+  .choice-btn:hover:not(:disabled) {
+    background: #6200ee;
+  }
+  .leaderboard li {
+    margin: 5px 0;
+  }
+  #hack-section button {
+    margin: 5px 5px 0 0;
+  }
+  #messages {
+    margin-top: 10px;
+    font-style: italic;
+    min-height: 24px;
+  }
+</style>
+</head>
+<body>
+
+<div id="login">
+  <h1>Welcome to romans stupid games</h1>
+  <input type="text" id="playerName" placeholder="Enter your name" autocomplete="off" />
+  <button id="joinBtn" disabled>Join Lobby</button>
+  <div id="loginMsg" style="color:#f88; margin-top:10px;"></div>
+</div>
+
+<div id="lobby">
+  <h2>Lobby</h2>
+  <ul id="playersList" class="player-list"></ul>
+  <button id="startBtn" disabled>Start Game</button>
+  <div id="lobbyMsg" style="color:#f88; margin-top:10px;"></div>
+</div>
+
+<div id="game">
+  <h2>Question <span id="questionNumber"></span> / <span id="questionTotal"></span></h2>
+  <p id="questionText"></p>
+  <div id="choices"></div>
+
+  <div id="hack-section">
+    <h3>Hack a player (Costs 20 crypto):</h3>
+    <div id="hackButtons"></div>
+  </div>
+
+  <p>Crypto: <span id="cryptoCount">0</span></p>
+
+  <button id="nextQuestionBtn" disabled>Next Question</button>
+  <div id="messages"></div>
+</div>
+
+<div id="endgame">
+  <h2>Game Over! Final Leaderboard</h2>
+  <ul id="finalLeaderboard" class="leaderboard"></ul>
+  <button id="restartBtn">Restart (Reload)</button>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const socket = io();
+
+  // Elements
+  const loginDiv = document.getElementById("login");
+  const lobbyDiv = document.getElementById("lobby");
+  const gameDiv = document.getElementById("game");
+  const endDiv = document.getElementById("endgame");
+
+  const playerNameInput = document.getElementById("playerName");
+  const joinBtn = document.getElementById("joinBtn");
+  const loginMsg = document.getElementById("loginMsg");
+
+  const playersList = document.getElementById("playersList");
+  const startBtn = document.getElementById("startBtn");
+  const lobbyMsg = document.getElementById("lobbyMsg");
+
+  const questionNumber = document.getElementById("questionNumber");
+  const questionTotal = document.getElementById("questionTotal");
+  const questionText = document.getElementById("questionText");
+  const choicesDiv = document.getElementById("choices");
+
+  const hackButtonsDiv = document.getElementById("hackButtons");
+  const cryptoCountSpan = document.getElementById("cryptoCount");
+
+  const nextQuestionBtn = document.getElementById("nextQuestionBtn");
+  const messagesDiv = document.getElementById("messages");
+
+  const finalLeaderboard = document.getElementById("finalLeaderboard");
+  const restartBtn = document.getElementById("restartBtn");
+
+  let playerName = "";
+  let playerCrypto = 0;
+  let currentQuestion = null;
+  let hasAnswered = false;
+  let hasHacked = false;
+  let players = [];
+
+  // Enable join button only if name entered
+  playerNameInput.addEventListener("input", () => {
+    joinBtn.disabled = playerNameInput.value.trim() === "";
+  });
+
+  joinBtn.addEventListener("click", () => {
+    playerName = playerNameInput.value.trim();
+    if (!playerName) return;
+    socket.emit("joinGame", playerName);
+  });
+
+  startBtn.addEventListener("click", () => {
+    socket.emit("startGame");
+  });
+
+  nextQuestionBtn.addEventListener("click", () => {
+    nextQuestionBtn.disabled = true;
+    messagesDiv.textContent = "";
+    hasAnswered = false;
+    hasHacked = false;
+    socket.emit("nextQuestionReady");
+  });
+
+  restartBtn.addEventListener("click", () => {
+    location.reload();
+  });
+
+  function renderLobby(players) {
+    playersList.innerHTML = "";
+    players.forEach((p) => {
+      const li = document.createElement("li");
+      li.textContent = `${p.name} (Crypto: ${p.crypto || 0})`;
+      playersList.appendChild(li);
+    });
+    startBtn.disabled = players.length < 2;
+    lobbyMsg.textContent = "";
+  }
+
+  function renderQuestion(data) {
+    currentQuestion = data;
+    questionNumber.textContent = data.index;
+    questionTotal.textContent = data.total;
+    questionText.textContent = data.question;
+    choicesDiv.innerHTML = "";
+    data.choices.forEach((choice) => {
+      const btn = document.createElement("button");
+      btn.textContent = choice;
+      btn.className = "choice-btn";
+      btn.disabled = false;
+      btn.onclick = () => {
+        if (hasAnswered) return;
+        socket.emit("submitAnswer", choice);
+        hasAnswered = true;
+        btn.disabled = true;
+        // Disable all buttons once answered
+        [...choicesDiv.children].forEach((b) => (b.disabled = true));
+      };
+      choicesDiv.appendChild(btn);
+    });
+
+    // Update crypto
+    const self = players.find((p) => p.name === playerName);
+    playerCrypto = self ? self.crypto : 0;
+    cryptoCountSpan.textContent = playerCrypto;
+
+    // Hack buttons
+    renderHackButtons();
+    nextQuestionBtn.disabled = true;
+    messagesDiv.textContent = "";
+  }
+
+  function renderHackButtons() {
+    hackButtonsDiv.innerHTML = "";
+    if (players.length < 2) {
+      hackButtonsDiv.textContent = "Not enough players to hack.";
+      return;
+    }
+
+    players.forEach((p) => {
+      if (p.name === playerName) return; // can't hack self
+      const btn = document.createElement("button");
+      btn.textContent = `Hack ${p.name}`;
+      btn.disabled = playerCrypto < 20 || hasHacked;
+      btn.onclick = () => {
+        socket.emit("hackPlayer", getPlayerIdByName(p.name));
+        hasHacked = true;
+        // Disable hack buttons after hacking
+        [...hackButtonsDiv.children].forEach((b) => (b.disabled = true));
+      };
+      hackButtonsDiv.appendChild(btn);
+    });
+  }
+
+  function getPlayerIdByName(name) {
+    const p = players.find((p) => p.name === name);
+    return p ? p.id : null;
+  }
+
+  // Socket listeners
+
+  socket.on("gameAlreadyStarted", () => {
+    loginMsg.textContent = "Game has already started. Please wait for next round.";
+  });
+
+  socket.on("lobbyUpdate", (playersListData) => {
+    players = playersListData;
+    renderLobby(players);
+    if (players.length > 0) {
+      loginDiv.style.display = "none";
+      lobbyDiv.style.display = "block";
+    }
+  });
+
+  socket.on("gameStarted", () => {
+    lobbyDiv.style.display = "none";
+    gameDiv.style.display = "block";
+  });
+
+  socket.on("newQuestion", (data) => {
+    // Update players for latest crypto counts
+    data.leaderboard.forEach((p) => {
+      const existing = players.find((pl) => pl.name === p.name);
+      if (existing) existing.crypto = p.crypto;
+    });
+    playerCrypto = players.find((p) => p.name === playerName)?.crypto || 0;
+
+    renderQuestion(data);
+  });
+
+  socket.on("answerResult", (correct) => {
+    if (correct) {
+      messagesDiv.textContent = "Correct! +10 crypto.";
+    } else {
+      messagesDiv.textContent = "Wrong answer.";
+    }
+    cryptoCountSpan.textContent = playerCrypto;
+    nextQuestionBtn.disabled = false;
+  });
+
+  socket.on("leaderboardUpdate", (leaderboard) => {
+    // Update players crypto to keep in sync
+    leaderboard.forEach((p) => {
+      const existing = players.find((pl) => pl.name === p.name);
+      if (existing) existing.crypto = p.crypto;
+    });
+    playerCrypto = players.find((p) => p.name === playerName)?.crypto || 0;
+    cryptoCountSpan.textContent = playerCrypto;
+
+    renderHackButtons();
+  });
+
+  socket.on("hackedBy", (hackerName, amount) => {
+    messagesDiv.textContent = `You were hacked by ${hackerName} and lost ${amount} crypto!`;
+  });
+
+  socket.on("hackResult", (stolenAmount, targetName) => {
+    messagesDiv.textContent = `You hacked ${targetName} and stole ${stolenAmount} crypto!`;
+    // Update your crypto count locally immediately
+    playerCrypto += stolenAmount - 20; // hacked cost 20 but gained stolen
+    cryptoCountSpan.textContent = playerCrypto;
+  });
+
+  socket.on("errorMsg", (msg) => {
+    messagesDiv.textContent = msg;
+  });
+
+  socket.on("gameEnded", (leaderboard) => {
+    gameDiv.style.display = "none";
+    endDiv.style.display = "block";
+
+    finalLeaderboard.innerHTML = "";
+    leaderboard.forEach((p, i) => {
+      const li = document.createElement("li");
+      li.textContent = `${i + 1}. ${p.name} — ${p.crypto} crypto`;
+      finalLeaderboard.appendChild(li);
+    });
+  });
+</script>
+
+</body>
+</html>
